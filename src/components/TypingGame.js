@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { use, useEffect, useRef, useState } from "react";
 import {
   Box,
   Button,
@@ -14,6 +14,7 @@ import { ref, set, onValue, onDisconnect, update } from "firebase/database";
 import { v4 as uuidv4 } from "uuid";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import { useGenerateSentence } from "../hooks/useGenerateSentance";
+import { useRoomCleanup } from "../hooks/useRoomCleanup";
 
 const TypingRace = () => {
   const [startTime, setStartTime] = useState("");
@@ -33,10 +34,11 @@ const TypingRace = () => {
   const uid = useRef(uuidv4()).current;
 
     const generateSentence = useGenerateSentence();
+      useRoomCleanup();
 
   useEffect(() => {
     if (status === "running") {
-      setGameTimeLeft(60); //GAME TIMER
+      setGameTimeLeft(30); //GAME TIMER
       setStartTime(Date.now());
       timerRef.current = setInterval(() => {
         setGameTimeLeft((prev) => {
@@ -59,7 +61,7 @@ const TypingRace = () => {
   }, [status, currentRoom]);
 
   useEffect(() => {
-    if (currentRoom) return;
+    if (!currentRoom) return;
     if (status === "finished") {
       let winnerId = null;
       let bestScore = -1;
@@ -78,7 +80,7 @@ const TypingRace = () => {
       });
       if (winner !== winnerId) {
         const roomRef = ref(db, `rooms/${currentRoom}`);
-        update(roomRef, { winner: winnerId });
+        update(roomRef, { winner: winnerId, endedAt: Date.now() });
       }
     }
   }, [status, players, currentRoom, winner]);
@@ -279,16 +281,16 @@ const TypingRace = () => {
         userSelect={"none"}
       >
         {text.split("").map((char, index) => {
-          let color = "gray.700";
+          let color = "gray.300";
           if (index < userInput.length) {
             if (userInput[index] === char) {
-              color = "green.500";
+              color = "green.300";
             } else {
-              color = "red.500";
+              color = "red.300";
             }
           }
           return (
-            <Text as="span" key={index} color={color}>
+            <Text as="span" key={index} background={color}>
               {char}
             </Text>
           );
