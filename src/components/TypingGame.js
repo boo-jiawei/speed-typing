@@ -13,15 +13,18 @@ import { database as db, auth } from "../firebase";
 import { ref, set, onValue, onDisconnect, update } from "firebase/database";
 import { v4 as uuidv4 } from "uuid";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
+import { use } from "framer-motion/m";
 
 const sampleTexts = [
   "But when a man suspects any wrong, it sometimes happens that if he be already involved in the matter, he insensibly strives to cover up his suspicions even from himself.",
   "Time is too slow for those who wait, too swift for those who fear, too long for those who grieve, too short for those who rejoice, but for those who love, time is eternity.",
   "Some enchanted evening, you may see a stranger. You may see a stranger across a crowded room, and somehow you know, you know even then, that somewhere you'll see her again and again.",
   "Keep in mind that many people have died for their beliefs, it's actually quite common. The real courage is in living and suffering for what you believe.",
+  //"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
 ];
 
 const TypingRace = () => {
+  const [startTime, setStartTime] = useState("");
   const [text, setText] = useState("");
   const [userInput, setUserInput] = useState("");
   const [roomId, setRoomId] = useState("");
@@ -31,6 +34,8 @@ const TypingRace = () => {
   const [winner, setWinner] = useState(null);
   const [playerName, setPlayerName] = useState(null);
   const [countdown, setCountdown] = useState(null);
+  const [gameTimeLeft, setGameTimeLeft] = useState(60);
+  const timerRef = useRef(null);
 
   const inputRef = useRef(null);
   const uid = useRef(uuidv4()).current;
@@ -38,6 +43,54 @@ const TypingRace = () => {
   const randomizedText =
     sampleTexts[Math.floor(Math.random() * sampleTexts.length)];
 
+  useEffect(() => {
+    if (status === "running") {
+      setGameTimeLeft(60); //GAME TIMER
+      setStartTime(Date.now());
+      timerRef.current = setInterval(() => {
+        setGameTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current);
+            //no more time
+            if (currentRoom) {
+              const roomRef = ref(db, `rooms/${currentRoom}`);
+              update(roomRef, { status: "finished", timerExpired: true });
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [status, currentRoom]);
+
+  useEffect(() => {
+    if (currentRoom) return;
+    if (status === "finished") {
+      let winnerId = null;
+      let bestScore = -1;
+      let bestAccuracy = -1;
+      Object.entries(players).forEach(([id, p]) => {
+        if (p.wpm && p.accuracy) {
+          if (
+            p.wpm > bestScore ||
+            (p.wpm === bestScore && p.accuracy > bestAccuracy)
+          ) {
+            bestScore = p.wpm;
+            bestAccuracy = p.accuracy;
+            winnerId = id;
+          }
+        }
+      });
+      if (winner !== winnerId) {
+        const roomRef = ref(db, `rooms/${currentRoom}`);
+        update(roomRef, { winner: winnerId });
+      }
+    }
+  }, [status, players, currentRoom, winner]);
   // Handle Firebase Auth
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (currentUser) => {
@@ -51,19 +104,34 @@ const TypingRace = () => {
   // Push progress
   const pushProgress = (room, progress) => {
     const roomRef = ref(db, `rooms/${room}/players/${uid}`);
-    set(roomRef, {
+    let stats = {
       name: playerName || `Player-${uid.slice(0, 5)}`,
       progress,
       finished: progress >= 100,
-    });
+      ready: players[uid]?.ready || false,
+    };
 
-    if (progress >= 100) {
-      const roomMetaRef = ref(db, `rooms/${room}`);
-      update(roomMetaRef, {
-        status: "finished",
-        winner: uid,
-      });
+    if (progress >= 100 && startTime) {
+      const finishTime = Date.now();
+      const timeTaken = (finishTime - startTime) / 1000;
+      const wordsTyped = userInput.trim().split(/\s+/).length;
+      const wpm = Math.round((wordsTyped / timeTaken) * 60);
+      let correctChars = 0;
+      for (let i = 0; i < userInput.length; i++) {
+        if (userInput[i] === text[i]) correctChars++;
+      }
+      const accuracy = text.length
+        ? Math.round((correctChars / text.length) * 100)
+        : 0;
+      stats = {
+        ...stats,
+        finishTime,
+        timeTaken,
+        wpm,
+        accuracy,
+      };
     }
+    set(roomRef, stats);
   };
 
   // Handle typing
@@ -127,6 +195,7 @@ const TypingRace = () => {
       setStatus(data.status);
       setWinner(data.winner || null);
       setPlayers(data.players || {});
+      setCountdown(data.countdown || null);
     });
     return () => unsubscribe();
   }, [currentRoom]);
@@ -139,7 +208,10 @@ const TypingRace = () => {
 
   useEffect(() => {
     if (!currentRoom) return;
+    // 1player
     if (Object.keys(players).length > 0) {
+      // 2 players
+      // if (Object.keys(players).length > 0) {
       const allReady = Object.values(players).every((p) => p.ready);
       if (allReady && status === "waiting") {
         const roomRef = ref(db, `rooms/${currentRoom}`);
@@ -150,13 +222,18 @@ const TypingRace = () => {
           cd -= 1;
           if (cd > 0) {
             update(roomRef, { countdown: cd });
-            setCountdown(cd);
           } else {
             update(roomRef, { status: "running", countdown: null });
-            setCountdown(null);
             clearInterval(interval);
           }
         }, 1000);
+      }
+      const allFinished =
+        Object.values(players).length > 1 &&
+        Object.values(players).every((p) => p.finished);
+      if (status === "running" && allFinished) {
+        const roomRef = ref(db, `rooms/${currentRoom}`);
+        update(roomRef, { status: "finished", finishedEarly: true });
       }
     }
   }, [players, status, currentRoom]);
@@ -170,6 +247,11 @@ const TypingRace = () => {
       borderRadius="md"
     >
       <Heading size="md">Realtime Typing Race</Heading>
+      {status === "running" && (
+        <Text fontSize="lg" color="red.500" fontWeight="bold">
+          Time Left: {gameTimeLeft}s
+        </Text>
+      )}
 
       <Text fontSize="sm" color="gray.600">
         {currentRoom
@@ -203,6 +285,7 @@ const TypingRace = () => {
         fontSize="lg"
         minH="100px"
         w="100%"
+        userSelect={"none"}
       >
         {text.split("").map((char, index) => {
           let color = "gray.700";
@@ -234,27 +317,47 @@ const TypingRace = () => {
         {Object.keys(players).length}
       </Text>
 
-      {status === "finished" && winner && (
-        <Text color="teal.600" fontWeight="bold">
-          Winner: {players[winner]?.name || "Unknown"}
-        </Text>
+      {status === "finished" && (
+        <Box>
+          <Text color="teal.600" fontWeight="bold">
+            {winner
+              ? `winner: ${players[winner]?.name || "Unknown"} (WPM: ${
+                  players[winner]?.wpm || 0
+                }, Accuracy: ${players[winner]?.accuracy || 0}%)`
+              : "no winner"}
+          </Text>
+          <VStack align="start" mt={2}>
+            {Object.entries(players).map(([id, p]) => (
+              <Text key={id}>
+                {p.name}:{""}
+                {p.finished
+                  ? `WPM: ${p.wpm || 0}, Accuracy: ${p.accuracy || 0}%`
+                  : "not finished"}
+              </Text>
+            ))}
+          </VStack>
+        </Box>
       )}
 
       <VStack w="100%" align="stretch">
         {Object.entries(players).map(([id, p]) => (
           <Box key={id}>
-            <Text>{p.name}</Text>
+            <Text>
+              {p.name} {p.ready && status === "waiting" ? "✅ Ready" : ""}
+            </Text>
             <Progress value={p.progress} colorScheme="teal" />
           </Box>
         ))}
       </VStack>
 
       <HStack>
-        {status === "waiting" && currentRoom && (
-          <Button onClick={markReady} mt={2} colorScheme="blue">
-            I'm Ready
-          </Button>
-        )}
+        {status === "waiting" &&
+          currentRoom &&
+          !players[uid]?.ready && ( // ✅ hide ready button once clicked
+            <Button onClick={markReady} colorScheme="blue" mt={2}>
+              I'm Ready
+            </Button>
+          )}
 
         {status === "countdown" && (
           <Text fontSize="2xl" fontWeight="bold" color="orange.500">
