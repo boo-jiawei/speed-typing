@@ -13,15 +13,7 @@ import { database as db, auth } from "../firebase";
 import { ref, set, onValue, onDisconnect, update } from "firebase/database";
 import { v4 as uuidv4 } from "uuid";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
-import { use } from "framer-motion/m";
-
-const sampleTexts = [
-  "But when a man suspects any wrong, it sometimes happens that if he be already involved in the matter, he insensibly strives to cover up his suspicions even from himself.",
-  "Time is too slow for those who wait, too swift for those who fear, too long for those who grieve, too short for those who rejoice, but for those who love, time is eternity.",
-  "Some enchanted evening, you may see a stranger. You may see a stranger across a crowded room, and somehow you know, you know even then, that somewhere you'll see her again and again.",
-  "Keep in mind that many people have died for their beliefs, it's actually quite common. The real courage is in living and suffering for what you believe.",
-  //"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
-];
+import { useGenerateSentence } from "../hooks/useGenerateSentance";
 
 const TypingRace = () => {
   const [startTime, setStartTime] = useState("");
@@ -40,8 +32,7 @@ const TypingRace = () => {
   const inputRef = useRef(null);
   const uid = useRef(uuidv4()).current;
 
-  const randomizedText =
-    sampleTexts[Math.floor(Math.random() * sampleTexts.length)];
+    const generateSentence = useGenerateSentence();
 
   useEffect(() => {
     if (status === "running") {
@@ -156,7 +147,7 @@ const TypingRace = () => {
     const id = uuidv4().slice(0, 6).toUpperCase();
     setCurrentRoom(id);
     set(ref(db, `rooms/${id}`), {
-      text: randomizedText,
+      text: generateSentence(),
       status: "waiting",
       players: {},
       winner: null,
@@ -202,7 +193,7 @@ const TypingRace = () => {
 
   // Load text when mounted
   useEffect(() => {
-    setText(randomizedText);
+    setText(generateSentence());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
