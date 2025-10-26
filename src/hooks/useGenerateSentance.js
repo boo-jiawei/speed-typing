@@ -1,4 +1,3 @@
-import { a } from "framer-motion/m";
 import { useCallback } from "react";
 
 export const useGenerateSentence = () => {
@@ -155,6 +154,7 @@ export const useGenerateSentence = () => {
       )} ${rand(nouns)} without stopping.`,
     ];
     return templates[Math.floor(Math.random() * templates.length)];
+        // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   return generateSentence;
